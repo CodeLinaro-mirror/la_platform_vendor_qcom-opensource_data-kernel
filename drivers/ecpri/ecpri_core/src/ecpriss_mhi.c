@@ -633,6 +633,9 @@ void ecpriss_mhi_process_async_link_state_util(int port, int link, int state, in
 	if(!ctx)
 		return;
 
+	if(!ctx->mhi_vf_info)
+		return;
+
 	out_ch_info = &ctx->mhi_vf_info[vf_idx].ch_info[ECPRISS_MHI_CH_DIR_OUT];
 
 	if(atomic_read(&out_ch_info->ch_state) != ECPRISS_MHI_CH_STATE_OPEN){

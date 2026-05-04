@@ -100,6 +100,8 @@ extern bool enable_tx_comp_poll;
 
 #define MTIP_L2_LANE1_INDEX     12
 #define MTIP_L2_LANE2_INDEX     13
+#define MTIP_C2C1_LANE1_INDEX   14
+#define MTIP_C2C1_LANE2_INDEX   15
 // Maximum number of retries with speed mode change for dual rate optics module
 #define MTIP_NEXT_SPEED_MODE_RETRY_MAX_COUNT 2
 

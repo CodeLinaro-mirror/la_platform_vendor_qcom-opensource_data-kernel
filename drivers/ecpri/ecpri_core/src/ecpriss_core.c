@@ -1722,7 +1722,7 @@ static int ecpriss_core_register_callbacks_v2(bool *is_eth_ready)
 				if(ret != 0) {
 					ECPRILOGERR("C2C2 bringup failed\n");
 				}
-			}
+			}	
 		}
 	}while (0);
 	return ret;

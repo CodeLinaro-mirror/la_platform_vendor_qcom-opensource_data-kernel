@@ -601,8 +601,8 @@ int mtip_phy_teardown_phy(u32 link_index)
     mtip_phy_lane_bring_up_progress_ind(link_index, true);
 
     // Process link down
-    if( ( link_index != MTIP_L2_ETH_LINK_INDEX && (mtip_loopback_mode == MTIP_MODE_DEFAULT || mtip_loopback_mode == MTIP_MODE_PHY_LOOPBACK)) ||
-        ( link_index == MTIP_L2_ETH_LINK_INDEX && (mtip_c2c2_loopback_mode == MTIP_MODE_DEFAULT || mtip_c2c2_loopback_mode == MTIP_MODE_PHY_LOOPBACK) ) )
+    if( ( link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX && (mtip_loopback_mode == MTIP_MODE_DEFAULT || mtip_loopback_mode == MTIP_MODE_PHY_LOOPBACK)) ||
+        ( (link_index == MTIP_L2_ETH_LINK_INDEX || link_index == MTIP_C2C1_ETH_LINK_INDEX) && (mtip_c2c2_loopback_mode == MTIP_MODE_DEFAULT || mtip_c2c2_loopback_mode == MTIP_MODE_PHY_LOOPBACK) ) )
     {
         mtip_process_link_state(link_index, false);
     }

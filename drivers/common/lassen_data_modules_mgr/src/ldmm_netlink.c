@@ -198,7 +198,7 @@ int ldmm_qxdm_logger_get_stats_info(struct sk_buff *sender_skb, struct genl_info
 
 	for(link_index = 0; link_index < TOTAL_LINKS; link_index++)
 	{
-		if(mtip_driver_iface_ops.ldmm_eth_iface_get_if_link_up(link_index))
+		if(link_index != MTIP_L2_ETH_LINK_INDEX && mtip_driver_iface_ops.ldmm_eth_iface_get_if_link_up(link_index))
 		{
 			stats.total_active_links++;
 			stats.stats[i++] = mtip_driver_iface_ops.ldmm_eth_iface_get_stats_info(link_index);

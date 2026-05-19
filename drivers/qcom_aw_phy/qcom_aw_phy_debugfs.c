@@ -111,7 +111,9 @@ bool                     tx_fir_cfg_cache_valid[QCOM_AW_PHY_INST_MAX][PHY_LANE_M
 
 extern struct eth_phy_iface_ops qcom_aw_phy_driver_iface_ops;
 
+#ifndef MIN
 #define MIN(a,b) ((a < b) ? a : b)
+#endif
 
 char help_menu[] = {
 "1		ETH PHY drivers interface registration(dummy MAC/PHY registration)\n\

@@ -80,7 +80,9 @@ bool                     sysfs_tx_fir_cfg_cache_valid[QCOM_AW_PHY_INST_MAX][PHY_
 
 extern struct eth_phy_iface_ops qcom_aw_phy_driver_iface_ops;
 
+#ifndef MIN
 #define MIN(a,b) ((a < b) ? a : b)
+#endif
 
 #define MAX_INT_CHAR_SIZE 15
 

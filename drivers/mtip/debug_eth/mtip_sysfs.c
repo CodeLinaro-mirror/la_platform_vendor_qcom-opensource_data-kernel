@@ -59,7 +59,9 @@
 #include <linux/kobject.h>
 #include <linux/sysfs.h> /* sysfs addition*/
 
+#ifndef MIN
 #define MIN(a,b) ((a < b) ? a : b)
+#endif
 
 void __iomem *debug_port_base_address;
 

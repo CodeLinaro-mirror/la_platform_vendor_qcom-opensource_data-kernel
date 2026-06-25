@@ -59,6 +59,21 @@ module_param(qcom_aw_phy_ref_clk_mode, int,
                   S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 MODULE_PARM_DESC(qcom_aw_phy_ref_clk_mode, "PHY REF clock mode");
 
+/*
+ * CXO oscillator clock termination mode for ETH_CXO_OSC:
+ *   0 = AW_RC_HI_Z   - High impedance
+ *   1 = AW_RC_R50_SE - 50 Ω single-ended (HW reset default)
+ *   2 = AW_RC_R100_DF - 100 Ω differential (board bring-up default)
+ *
+ * Set to 2 by default to match board-level differential clock design
+ * (Amazon LEO BU requirement).  Only applies when ref_clk_mode == OSCILLATOR.
+ */
+int qcom_aw_phy_cxo_osc_term_mode = AW_RC_R100_DF;
+module_param(qcom_aw_phy_cxo_osc_term_mode, int,
+             S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+MODULE_PARM_DESC(qcom_aw_phy_cxo_osc_term_mode,
+                 "CXO OSC ref-clk termination: 0=Hi-Z, 1=50R SE, 2=100R diff");
+
 int qcom_aw_phy_toggle_polarity = 0;
 module_param(qcom_aw_phy_toggle_polarity, int,
              S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
@@ -881,6 +896,67 @@ func_exit:
 }
 
 /*-------------------------------------------------------------------
+* qcom_aw_phy_set_cxo_osc_termination
+
+* Description: Programs ETH_CXO_OSC ref-clock input termination on
+*   every valid PHY instance.  Must be called after ref-clock
+*   propagation is configured so that the CMN block is accessible.
+*
+*   Termination mode is controlled by the qcom_aw_phy_cxo_osc_term_mode
+*   module parameter (default AW_RC_R100_DF = 100 Ω differential).
+*
+*   Only meaningful when qcom_aw_phy_ref_clk_mode == REF_CLK_MODE_OSCILLATOR.
+*   Skipped silently in Si-Labs mode to avoid touching clock regs that
+*   are driven by the external clock chip.
+------------------------------------------------------------------- */
+static void qcom_aw_phy_set_cxo_osc_termination(
+    struct qcom_aw_phy_config *phy_config_info)
+{
+  struct qcom_aw_phy_inst_config *phy_inst_info = NULL;
+  enum qcom_aw_phy_instance_enum phy_inst_type;
+  mss_access_t mss = {.phy_offset = 0, .lane_offset = 0};
+  aw_refclk_term_mode_t term_mode =
+      (aw_refclk_term_mode_t)qcom_aw_phy_cxo_osc_term_mode;
+  int ret;
+
+  if (qcom_aw_phy_ref_clk_mode != REF_CLK_MODE_OSCILLATOR) {
+    QCOM_AW_PHY_LOG_INFO(
+        "CXO OSC term skipped: ref_clk_mode=%d (not oscillator)",
+        qcom_aw_phy_ref_clk_mode);
+    return;
+  }
+
+  if (term_mode < AW_RC_HI_Z || term_mode > AW_RC_R100_DF) {
+    QCOM_AW_PHY_LOG_ERR(
+        "CXO OSC term: invalid mode %d, defaulting to AW_RC_R100_DF",
+        qcom_aw_phy_cxo_osc_term_mode);
+    term_mode = AW_RC_R100_DF;
+  }
+
+  QCOM_AW_PHY_LOG_INFO("CXO OSC term: setting mode %d on all PHY instances",
+                       term_mode);
+
+  for (phy_inst_type = QCOM_AW_PHY_INST_FH0;
+       phy_inst_type < QCOM_AW_PHY_INST_MAX; phy_inst_type++) {
+    phy_inst_info = &phy_config_info->phy_inst_config_info[phy_inst_type];
+    if (!phy_inst_info || !phy_inst_info->valid)
+      continue;
+
+    mss.phy_offset = phy_inst_info->base_addr;
+    mss.lane_offset = 0;
+
+    ret = aw_pmd_refclk_termination_set(&mss, term_mode);
+    if (ret != AW_ERR_CODE_NONE)
+      QCOM_AW_PHY_LOG_ERR(
+          "CXO OSC term: aw_pmd_refclk_termination_set failed "
+          "phy_inst=%d ret=%d", phy_inst_type, ret);
+    else
+      QCOM_AW_PHY_LOG_INFO(
+          "CXO OSC term: phy_inst=%d mode=%d OK", phy_inst_type, term_mode);
+  }
+}
+
+/*-------------------------------------------------------------------
 * qcom_aw_phy_hw_init
 
 * @pdev: platform device pointer
@@ -975,6 +1051,11 @@ static void qcom_aw_phy_hw_init() {
       }
     }
   }
+
+  /* Set CXO oscillator clock termination (ETH_CXO_OSC CMN_REFCLK register).
+   * Must follow ref-clock propagation so the CMN block is live.
+   * Default: AW_RC_R100_DF (100 Ω differential) for board bring-up. */
+  qcom_aw_phy_set_cxo_osc_termination(phy_config_info);
 
   mdelay(500);
 

@@ -80,6 +80,7 @@ aw_txfir_config_t        sysfs_tx_fir_cfg_cache[QCOM_AW_PHY_INST_MAX][PHY_LANE_M
 bool                     sysfs_tx_fir_cfg_cache_valid[QCOM_AW_PHY_INST_MAX][PHY_LANE_MAX] = {{false}};
 
 extern struct eth_phy_iface_ops qcom_aw_phy_driver_iface_ops;
+extern bool prbs_test_running;
 
 #ifndef MIN
 #define MIN(a,b) ((a < b) ? a : b)
@@ -682,9 +683,11 @@ ssize_t qcom_aw_phy_sysfs_set_attr(struct kobject *kobj, struct kobj_attribute *
           }
         }
 
+          prbs_test_running = true;
           remaining = (u32)sysfs_measure_time;
           while (remaining--)
             msleep(1000);
+          prbs_test_running = false;
 
         for (j = min_port; j <= max_port; j++) {
           phy_inst_info = &phy_config_info->phy_inst_config_info[j];

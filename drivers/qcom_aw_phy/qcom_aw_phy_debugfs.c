@@ -48,6 +48,15 @@ static const struct file_operations qcom_aw_phy_debug_fs_prbs_result_ops = {
   .read = qcom_aw_phy_get_prbs_result,
 };
 
+static ssize_t qcom_aw_phy_get_prbs_status(struct file *file, char __user *buf,
+                                            size_t count, loff_t *ppos);
+
+extern bool prbs_test_running;
+
+static const struct file_operations qcom_aw_phy_debug_fs_prbs_status_ops = {
+  .read = qcom_aw_phy_get_prbs_status,
+};
+
 static const struct file_operations qcom_aw_phy_debug_fs_tx_eq_ops = {
   .write = qcom_aw_phy_set_tx_eq_val,
   .read = qcom_aw_phy_get_tx_eq_val,
@@ -106,6 +115,15 @@ uint64_t                               err_count[12] = {0};
 uint64_t                               ber[12] = {0};
 bool                                   check_prbs_all_lanes = false;
 uint32_t                               port_config_mask = 0x800000;
+
+static ssize_t qcom_aw_phy_get_prbs_status(struct file *file, char __user *buf,
+                                            size_t count, loff_t *ppos)
+{
+  char dbg_buf[32] = {0};
+  int nbytes = scnprintf(dbg_buf, sizeof(dbg_buf),
+                         "running: %d\n", prbs_test_running ? 1 : 0);
+  return simple_read_from_buffer(buf, count, ppos, dbg_buf, nbytes);
+}
 
 aw_txfir_config_t        tx_fir_cfg_cache[QCOM_AW_PHY_INST_MAX][PHY_LANE_MAX] = {{0}};
 bool                     tx_fir_cfg_cache_valid[QCOM_AW_PHY_INST_MAX][PHY_LANE_MAX] = {{false}};
@@ -182,6 +200,9 @@ void qcom_aw_phy_setup_debugfs() {
 
   debugfs_create_file("prbs_result", 0644, dobj, 0,
                       &qcom_aw_phy_debug_fs_prbs_result_ops);
+
+  debugfs_create_file("prbs_status", 0444, dobj, 0,
+                      &qcom_aw_phy_debug_fs_prbs_status_ops);
 
   debugfs_create_file("tx_eq_val", 0644, dobj, 0,
                       &qcom_aw_phy_debug_fs_tx_eq_ops);
@@ -737,9 +758,11 @@ ssize_t qcom_aw_phy_set_attr(struct file *file, const char __user *buf,
           }
         }
 
+          prbs_test_running = true;
           remaining = (u32)measure_time;
           while (remaining--)
             msleep(1000);
+          prbs_test_running = false;
 
         for (j = min_port; j <= max_port; j++) {
           phy_inst_info = &phy_config_info->phy_inst_config_info[j];

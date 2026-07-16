@@ -1777,7 +1777,13 @@ static int ecpriss_qudp_ingress_modify_cfg_v2(uint32_t port_index,
 	{
 		ingress_cfg.enable_mac_dst_check = 1;
 		ingress_cfg.enable_broadcast_check = 1;
-		ingress_cfg.non_local_dst_action = ECPRISS_MAC_ACTION_PASS_TO_A55;
+		/* In cascade mode FH1/FH2 (port_index >= 1) must forward
+		 * non-local-dst packets to the remote RU, not to A55.
+		 */
+		if (ru_cascade_mode && port_index >= 1)
+			ingress_cfg.non_local_dst_action = ECPRISS_QUDP_ACTION_PASS_TO_REMOTE;
+		else
+			ingress_cfg.non_local_dst_action = ECPRISS_MAC_ACTION_PASS_TO_A55;
 
 		memset(&mac_valid_bit,0, sizeof(mac_valid_bit));
 
@@ -1952,8 +1958,14 @@ static int ecpriss_qudp_ingress_init_cfg(void)
 				ingress_cfg->fh_ingress_config.ip_len_err_action = 1;
 				ingress_cfg->fh_ingress_config.vlan_filt_miss_action = 1;
 				ingress_cfg->fh_ingress_config.ip_filt_miss_action = 1;
-				ingress_cfg->fh_ingress_config.non_local_dst_action = 1;
-
+				/* FH1 and FH2 are cascade ports: non-local dst packets must
+				 * be forwarded to the remote RU, not sent to A55.
+				 */
+				if (ru_cascade_mode && port_idx >= 1)
+					ingress_cfg->fh_ingress_config.non_local_dst_action =
+							ECPRISS_QUDP_ACTION_PASS_TO_REMOTE;
+				else
+					ingress_cfg->fh_ingress_config.non_local_dst_action = 1;
 				ecpriss_qudp_hal_write_reg_n_fields(ECPRISS_QUDP_FH,
 						ECPRI_UDP_FH_INGRESS_CONFIG_P,
 						port_idx,
@@ -2049,7 +2061,14 @@ static int ecpriss_qudp_ingress_init_cfg_v2(void)
 				ingress_cfg->fh_ingress_config.ip_len_err_action = ECPRISS_QUDP_ACTION_DISCARD;
 				ingress_cfg->fh_ingress_config.vlan_filt_miss_action = ECPRISS_QUDP_ACTION_PASS_TO_A55;
 				ingress_cfg->fh_ingress_config.ip_filt_miss_action = ECPRISS_QUDP_ACTION_PASS_TO_A55;
-				ingress_cfg->fh_ingress_config.non_local_dst_action = ECPRISS_QUDP_ACTION_DISCARD;
+				/* FH1 and FH2 are cascade ports: non-local dst packets must
+				 * be forwarded to the remote RU, not discarded.
+				 */
+				if (ru_cascade_mode && port_idx >= 1)
+					ingress_cfg->fh_ingress_config.non_local_dst_action =
+							ECPRISS_QUDP_ACTION_PASS_TO_REMOTE;
+				else
+					ingress_cfg->fh_ingress_config.non_local_dst_action = ECPRISS_QUDP_ACTION_DISCARD;
 
 
 				ecpriss_qudp_hal_write_reg_n_fields(ECPRISS_QUDP_FH,
@@ -2103,9 +2122,21 @@ int ecpriss_qudp_ingress_init_cfg_modify_v2(int action)
 				ingress_cfg->fh_ingress_config.ip_len_err_action = action;
 				ingress_cfg->fh_ingress_config.vlan_filt_miss_action = action;
 				ingress_cfg->fh_ingress_config.ip_filt_miss_action = action;
-				ingress_cfg->fh_ingress_config.non_local_dst_action = action;
-
-				ECPRILOGINFO("ecpriss_qudp_ingress_init_cfg_modify_v2: action %d\n",action);
+				/* In cascade mode, FH1 and FH2 (port_idx >= 1) must keep
+				 * non_local_dst_action = PASS_TO_REMOTE so that packets
+				 * with a non-local MAC destination are forwarded to the
+				 * remote RU instead of being sent to A55 or discarded.
+				 * FH0 (port_idx == 0) is not a cascade port and uses
+				 * the caller-supplied action unchanged.
+				 */
+				if (ru_cascade_mode && port_idx >= 1)
+					ingress_cfg->fh_ingress_config.non_local_dst_action =
+							ECPRISS_QUDP_ACTION_PASS_TO_REMOTE;
+				else
+					ingress_cfg->fh_ingress_config.non_local_dst_action = action;
+				ECPRILOGINFO("ecpriss_qudp_ingress_init_cfg_modify_v2: port_idx=%d action=%d non_local_dst_action=%d\n",
+						port_idx, action,
+						ingress_cfg->fh_ingress_config.non_local_dst_action);
 
 				ecpriss_qudp_hal_write_reg_n_fields(ECPRISS_QUDP_FH,
 						ECPRI_UDP_FH_INGRESS_CONFIG_P_V2,
@@ -3550,6 +3581,219 @@ int ecpriss_qudp_init(struct device *dev)
 	return ret;
 }
 
+
+/*
+ * ecpriss_qudp_set_cascade_fh_mac_dst_check_v2 - Enable MAC dst address
+ * filtering on FH ingress ports FH1 and FH2 for RU cascade mode.
+ * Sets enable_mac_dst_check=1 with non_local_dst_action=PASS_TO_REMOTE so
+ * packets whose dst MAC does not match the local FH port MAC are forwarded
+ * to the remote RU instead of being dropped.
+ */
+void ecpriss_qudp_set_cascade_fh_mac_dst_check_v2(void)
+{
+	ecpri_qudp_hwio_def_ecpri_udp_fh_ingress_config_p_s_v2 ingress_cfg;
+	uint32_t port_index;
+
+	ECPRILOGINFO("ecpriss_qudp_set_cascade_fh_mac_dst_check_v2: setting enable_mac_dst_check=1 non_local_dst_action=%d for FH1 and FH2\n",
+			ECPRISS_QUDP_ACTION_PASS_TO_REMOTE);
+
+	/* Apply to FH1 (p=1) and FH2 (p=2) only */
+	for (port_index = 1; port_index <= 2; port_index++) {
+		memset(&ingress_cfg, 0, sizeof(ingress_cfg));
+
+		ecpriss_qudp_hal_read_reg_n_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_INGRESS_CONFIG_P_V2,
+				port_index,
+				&ingress_cfg);
+
+		ingress_cfg.enable_mac_dst_check = 1;
+		ingress_cfg.non_local_dst_action = ECPRISS_QUDP_ACTION_PASS_TO_REMOTE;
+
+		ecpriss_qudp_hal_write_reg_n_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_INGRESS_CONFIG_P_V2,
+				port_index,
+				&ingress_cfg);
+
+		ECPRILOGINFO("ecpriss_qudp_set_cascade_fh_mac_dst_check_v2: port_index=%d done\n", port_index);
+	}
+}
+
+
+/*
+ * ecpriss_qudp_set_cascade_l2_mac_dst_check_v2 - Enable MAC dst address
+ * filtering on the L2 (C2C2/eth30) ingress port for RU cascade mode.
+ * Sets enable_mac_dst_check=1 and non_local_dst_action=PASS_TO_REMOTE so
+ * that non-local packets received on the C2C2 link are forwarded to the
+ * remote QUDP path rather than dropped.
+ */
+void ecpriss_qudp_set_cascade_l2_mac_dst_check_v2(void)
+{
+	ecpri_qudp_hwio_def_ecpri_udp_l2_ingress_config_p_u_v2 ingress_cfg;
+
+	ECPRILOGINFO("ecpriss_qudp_set_cascade_l2_mac_dst_check_v2: setting enable_mac_dst_check=1 non_local_dst_action=%d for L2 p=0\n",
+			ECPRISS_QUDP_ACTION_PASS_TO_REMOTE);
+
+	/* Apply to L2 p=0 only.
+	 * Use raw read_reg_mn/write_reg_mn to avoid NULL construct/parse
+	 * pointers - no HAL dispatch entry exists for this reg in v2 */
+	ingress_cfg.value = ecpriss_qudp_hal_read_reg_mn(ECPRISS_QUDP_L2,
+			ECPRI_UDP_L2_INGRESS_CONFIG_P,
+			0, 0);
+
+	ingress_cfg.def.enable_mac_dst_check = 1;
+	ingress_cfg.def.non_local_dst_action = ECPRISS_QUDP_ACTION_PASS_TO_REMOTE;
+
+	ecpriss_qudp_hal_write_reg_mn(ECPRISS_QUDP_L2,
+			ECPRI_UDP_L2_INGRESS_CONFIG_P,
+			0, 0,
+			ingress_cfg.value);
+
+	ECPRILOGINFO("ecpriss_qudp_set_cascade_l2_mac_dst_check_v2: L2 p=0 val=0x%x done\n", ingress_cfg.value);
+}
+
+
+/*
+ * ecpriss_qudp_set_cascade_arp_trap_rules_v2 - Install ARP trap rules on
+ * FH ingress ports FH1 and FH2 for RU cascade mode.
+ * Configures trap rule entry n=3 to redirect ARP packets arriving on the
+ * cascaded FH ports to the A55 CPU so that ARP requests from the remote
+ * RU are handled locally.
+ */
+void ecpriss_qudp_set_cascade_arp_trap_rules_v2(void)
+{
+	ecpri_qudp_hwio_def_ecpri_udp_fh_trap_misc_port_p_entry_n_s_v2 trap_misc_cfg;
+	uint32_t cfg_value;
+	uint32_t port_index;
+
+	ECPRILOGINFO("ecpriss_qudp_set_cascade_arp_trap_rules_v2: enabling ARP trap on FH1 and FH2 (p=1,2) n=3\n");
+
+	/* Apply to FH1 (p=1) and FH2 (p=2), small rule index n=3 */
+	for (port_index = 1; port_index <= 2; port_index++) {
+
+		/* --- MISC: enable trap, action=pass to A55, rule32_offset=12 (Ethertype) --- */
+		memset(&trap_misc_cfg, 0, sizeof(trap_misc_cfg));
+		trap_misc_cfg.enable       = 1;
+		trap_misc_cfg.action       = 1; /* pass to A55 */
+		trap_misc_cfg.rule32_offset = 12; /* Ethertype at bytes [12:13] */
+
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_MISC_PORT_p_ENTRY_n_V2,
+				port_index, 3,
+				&trap_misc_cfg);
+
+		/* --- Rule32 value: ARP Ethertype 0x0806 --- */
+		cfg_value = 0x00000608;
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_RULE32_VAL_PORT_p_ENTRY_n_V2,
+				port_index, 3,
+				&cfg_value);
+
+		/* --- Rule32 mask: 0xFFFF to match first 2 bytes (Ethertype) --- */
+		cfg_value = 0x0000FFFF;
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_RULE32_MASK_PORT_p_ENTRY_n_V2,
+				port_index, 3,
+				&cfg_value);
+
+		/* --- Rule64 val LSB/MSB: 0 (not used) --- */
+		cfg_value = 0x00000000;
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_RULE64_VAL_LSB_PORT_p_ENTRY_n_V2,
+				port_index, 3,
+				&cfg_value);
+
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_RULE64_VAL_MSB_PORT_p_ENTRY_n_V2,
+				port_index, 3,
+				&cfg_value);
+
+		/* --- Rule64 mask LSB/MSB: 0 (not used) --- */
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_RULE64_MASK_LSB_PORT_p_ENTRY_n_V2,
+				port_index, 3,
+				&cfg_value);
+
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_RULE64_MASK_MSB_PORT_p_ENTRY_n_V2,
+				port_index, 3,
+				&cfg_value);
+
+		ECPRILOGINFO("ecpriss_qudp_set_cascade_arp_trap_rules_v2: port_index=%d n=3 done\n", port_index);
+	}
+}
+
+
+
+/*
+ * ecpriss_qudp_set_cascade_icmp_trap_rules_v2 - Install ICMP trap rules on
+ * FH ingress ports FH1 and FH2 for RU cascade mode.
+ * Configures trap rule entry n=2 to redirect ICMP packets arriving on the
+ * cascaded FH ports to the A55 CPU so that ping/ICMP requests from the
+ * remote RU are handled locally.
+ */
+void ecpriss_qudp_set_cascade_icmp_trap_rules_v2(void)
+{
+	ecpri_qudp_hwio_def_ecpri_udp_fh_trap_misc_port_p_entry_n_s_v2 trap_misc_cfg;
+	uint32_t cfg_value;
+	uint32_t port_index;
+
+	ECPRILOGINFO("ecpriss_qudp_set_cascade_icmp_trap_rules_v2: enabling ICMP trap on FH1 and FH2 (p=1,2) n=2\n");
+
+	/* Apply to FH1 (p=1) and FH2 (p=2), small rule index n=2 */
+	for (port_index = 1; port_index <= 2; port_index++) {
+
+		/* --- MISC: enable trap, action=5 (add timestamp + pass to A55), rule32_offset=12 --- */
+		memset(&trap_misc_cfg, 0, sizeof(trap_misc_cfg));
+		trap_misc_cfg.enable        = 1;
+		trap_misc_cfg.action        = 5; /* add timestamp and pass to A55 */
+		trap_misc_cfg.rule32_offset = 12; /* Ethertype at bytes [12:13] */
+
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_MISC_PORT_p_ENTRY_n_V2,
+				port_index, 2,
+				&trap_misc_cfg);
+
+		/* --- Rule32 value: IPv4 Ethertype 0x0800 for ICMP packets --- */
+		cfg_value = 0x00000008;
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_RULE32_VAL_PORT_p_ENTRY_n_V2,
+				port_index, 2,
+				&cfg_value);
+
+		/* --- Rule32 mask: 0xFFFF to extract 2 bytes (Ethertype) from offset 12 --- */
+		cfg_value = 0x0000FFFF;
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_RULE32_MASK_PORT_p_ENTRY_n_V2,
+				port_index, 2,
+				&cfg_value);
+
+		/* --- Rule64 val LSB/MSB: 0 (not used) --- */
+		cfg_value = 0x00000000;
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_RULE64_VAL_LSB_PORT_p_ENTRY_n_V2,
+				port_index, 2,
+				&cfg_value);
+
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_RULE64_VAL_MSB_PORT_p_ENTRY_n_V2,
+				port_index, 2,
+				&cfg_value);
+
+		/* --- Rule64 mask LSB/MSB: 0 (not used) --- */
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_RULE64_MASK_LSB_PORT_p_ENTRY_n_V2,
+				port_index, 2,
+				&cfg_value);
+
+		ecpriss_qudp_hal_write_reg_mn_fields(ECPRISS_QUDP_FH,
+				ECPRI_UDP_FH_TRAP_RULE64_MASK_MSB_PORT_p_ENTRY_n_V2,
+				port_index, 2,
+				&cfg_value);
+
+		ECPRILOGINFO("ecpriss_qudp_set_cascade_icmp_trap_rules_v2: port_index=%d n=2 done\n", port_index);
+	}
+}
+
 int ecpri_global_cfg_init_cascade_mode(void) {
 
        ecpri_global_hwio_def_ecpri_global_cfg_s ecpri_global_cfg;
@@ -3620,6 +3864,7 @@ int ecpriss_qudp_init_v2(struct device *dev)
 		{
 			break;
 		}
+
 		ret = ecpriss_qudp_ingress_init_cfg_v2();
 
 		if(ret < 0)
@@ -3627,6 +3872,18 @@ int ecpriss_qudp_init_v2(struct device *dev)
 			break;
 		}
 
+		if (ru_cascade_mode) {
+			ecpriss_qudp_set_cascade_fh_mac_dst_check_v2();
+			ecpriss_qudp_set_cascade_l2_mac_dst_check_v2();
+			ecpriss_qudp_set_cascade_arp_trap_rules_v2();
+			ecpriss_qudp_set_cascade_icmp_trap_rules_v2();
+			/* Keep global in sync so future ingress_init_cfg_modify calls
+			 * do not overwrite the PASS_TO_REMOTE setting on FH1/FH2.
+			 */
+			ecpriss_qudp_ingress_action = ECPRISS_QUDP_ACTION_PASS_TO_REMOTE;
+			ECPRILOGINFO("ecpriss_qudp_init_v2: ru_cascade_mode active, ecpriss_qudp_ingress_action set to PASS_TO_REMOTE (%d)\n",
+					ECPRISS_QUDP_ACTION_PASS_TO_REMOTE);
+		}
 
 		ret = ecpriss_qudp_egress_init_cfg_v2();
 
@@ -3670,6 +3927,10 @@ int ecpriss_qudp_init_v2(struct device *dev)
 
 		if(ecpriss_pdata_v2->dev_mode != ECPRISS_DEV_MODE_RU && ecpriss_pdata_v2->qudp_ctx_v2->lte_fh_enabled) {
 			ecpriss_qudp_set_lte_mac_filter_info();
+			ecpriss_qudp_set_nr_mac_filter_info();
+		}
+
+		if(ecpriss_pdata_v2->dev_mode != ECPRISS_DEV_MODE_RU && ru_cascade_mode) {
 			ecpriss_qudp_set_nr_mac_filter_info();
 		}
 

@@ -49,6 +49,7 @@
 #define ECPRI_MSS_ORAN_NOM_MAX (ECPRI_CLK_FREQ(500))
 
 extern int cascade_enable;
+extern int ru_cascade_mode;
 
 typedef enum
 {

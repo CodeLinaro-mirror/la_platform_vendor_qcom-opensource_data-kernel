@@ -38,6 +38,10 @@ int cascade_enable = 1;
 module_param(cascade_enable, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 MODULE_PARM_DESC(cascade_enable, "Enable Cascade Mode");
 
+int ru_cascade_mode = 0;
+module_param(ru_cascade_mode, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+MODULE_PARM_DESC(ru_cascade_mode, "Enable RU Cascade Mode: routes C2C1 LUT to FH");
+
 int enable_len_check = 1;
 module_param(enable_len_check, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 MODULE_PARM_DESC(enable_len_check, "Enable Length check for C/U plane packets");
@@ -824,6 +828,12 @@ void ecpriss_eth_event_processing(void)
 			ecpriss_qudp_set_nr_mac_filter();
 			ecpriss_eth_link_update_for_mhi_v2();
 		}
+
+		if(ecpriss_pdata_v2->dev_mode == ECPRISS_DEV_MODE_RU && ru_cascade_mode
+				&& ecpriss_pdata_v2->ecpri_state == ECPRI_CORE_INIT) {
+
+			ecpriss_qudp_set_nr_mac_filter();
+		}
 	}
 	return;
 }
@@ -845,13 +855,28 @@ void ecpriss_eth_topology_init_wq(struct work_struct *work)
 			ecpriss_qudp_set_nr_mac_filter();
 		}
 
+		if(ecpriss_pdata_v2->dev_mode == ECPRISS_DEV_MODE_RU && ru_cascade_mode
+				&& ecpriss_pdata_v2->ecpri_state == ECPRI_CORE_INIT) {
+
+			ecpriss_qudp_set_nr_mac_filter();
+		}
+
 	ECPRILOGINFO("dev_mode=%d\n",ecpriss_pdata_v2->dev_mode);
 	if(ecpriss_pdata_v2->dev_mode == ECPRISS_DEV_MODE_RU || ecpriss_pdata_v2->dev_mode
 			== ECPRISS_DEV_MODE_DU_PCIE_3_X_12) {
-		ECPRILOGINFO("Bringing up C2C2 port in loopback mode\n");
-		ret = (mtip_ecpri_ops.eth_ecpriss_enable_logging_port)(enable_c2c2);
-		if(ret != 0) {
-			ECPRILOGERR("C2C2 bringup failed\n");
+		if (ru_cascade_mode) {
+			ECPRILOGINFO("Bringing up C2C2 and C2C1 in E2E mode (ru_cascade_mode=%d)\n",
+				     ru_cascade_mode);
+			ret = (mtip_ecpri_ops.eth_ecpriss_enable_ru_cascade_c2c_bringup)();
+			if(ret != 0) {
+				ECPRILOGERR("C2C E2E bringup failed\n");
+			}
+		} else {
+			ECPRILOGINFO("Bringing up C2C2 port in loopback mode\n");
+			ret = (mtip_ecpri_ops.eth_ecpriss_enable_logging_port)(enable_c2c2);
+			if(ret != 0) {
+				ECPRILOGERR("C2C2 bringup failed\n");
+			}
 		}
 	}
 
@@ -1717,12 +1742,21 @@ static int ecpriss_core_register_callbacks_v2(bool *is_eth_ready)
 			ECPRILOGINFO("CB dev_mode=%d\n",ecpriss_pdata_v2->dev_mode);
 			if(ecpriss_pdata_v2->dev_mode == ECPRISS_DEV_MODE_RU || ecpriss_pdata_v2->dev_mode
 					== ECPRISS_DEV_MODE_DU_PCIE_3_X_12) {
-				ECPRILOGINFO("Bringing up C2C2 port in loopback mode\n");
-				ret = (mtip_ecpri_ops.eth_ecpriss_enable_logging_port)(enable_c2c2);
-				if(ret != 0) {
-					ECPRILOGERR("C2C2 bringup failed\n");
+				if (ru_cascade_mode) {
+					ECPRILOGINFO("CB: Bringing up C2C2 and C2C1 in E2E mode (ru_cascade_mode=%d)\n",
+						     ru_cascade_mode);
+					ret = (mtip_ecpri_ops.eth_ecpriss_enable_ru_cascade_c2c_bringup)();
+					if(ret != 0) {
+						ECPRILOGERR("CB: C2C E2E bringup failed\n");
+					}
+				} else {
+					ECPRILOGINFO("CB: Bringing up C2C2 port in loopback mode\n");
+					ret = (mtip_ecpri_ops.eth_ecpriss_enable_logging_port)(enable_c2c2);
+					if(ret != 0) {
+						ECPRILOGERR("CB: C2C2 bringup failed\n");
+					}
 				}
-			}	
+			}
 		}
 	}while (0);
 	return ret;
@@ -2109,6 +2143,12 @@ static int ecpriss_core_init_v2(struct platform_device *pdev)
 				&& ecpriss_pdata_v2->ecpri_state == ECPRI_CORE_INIT) {
 
 				ecpriss_qudp_set_nr_mac_filter();
+		}
+
+		if(ecpriss_pdata_v2->dev_mode == ECPRISS_DEV_MODE_RU && ru_cascade_mode
+				&& ecpriss_pdata_v2->ecpri_state == ECPRI_CORE_INIT) {
+
+			ecpriss_qudp_set_nr_mac_filter();
 		}
 
 	}while (0);

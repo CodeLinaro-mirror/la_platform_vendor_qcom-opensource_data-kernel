@@ -36,6 +36,7 @@ data_csm_diag_prbs_params data_csm_diag_prbs_params_info = {
     .num_of_errors = 0};
 
 data_csm_diag_prbs_result data_csm_diag_prbs_result_info;
+bool prbs_test_running;
 
 struct genl_ops qcom_aw_phy_prbs_genl_ops[DATA_CSM_DIAG_GNL_CMD_COUNT] = {
     {
@@ -263,9 +264,11 @@ int qcom_aw_phy_prbs_enable_disable(uint8_t enable_flag) {
       }
     }
 
+    prbs_test_running = true;
     remaining = (u32)data_csm_diag_prbs_params_info.monitor_duration;
     while (remaining--)
       msleep(1000);
+    prbs_test_running = false;
 
     for (j = min_port; j <= max_port; j++) {
       phy_inst_info = &phy_config_info->phy_inst_config_info[j];

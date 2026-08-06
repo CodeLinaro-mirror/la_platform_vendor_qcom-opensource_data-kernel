@@ -11,6 +11,7 @@
 */
 
 #include <linux/sysfs.h>
+#include <linux/delay.h>
 
 #include "qcom_aw_phy_main.h"
 #include "qcom_aw_phy_mtip_if.h"
@@ -232,6 +233,7 @@ ssize_t qcom_aw_phy_sysfs_set_attr(struct kobject *kobj, struct kobj_attribute *
   mss_access_t tx_mss = {.phy_offset = 0, .lane_offset = 0};
   int enable_flag = 0;
   uint32_t err_cnt_55_32, err_cnt_31_0;
+  u32 remaining = 0;
   bool error = false;
   enum qcom_aw_phy_eq_mode_enum eq_mode = QCOM_AW_PHY_EQ_MODE_MIN;
   memset(token_string, 0, sizeof(token_string));
@@ -680,7 +682,9 @@ ssize_t qcom_aw_phy_sysfs_set_attr(struct kobject *kobj, struct kobj_attribute *
           }
         }
 
-        USR_SLEEP(1000000 * sysfs_measure_time);
+          remaining = (u32)sysfs_measure_time;
+          while (remaining--)
+            msleep(1000);
 
         for (j = min_port; j <= max_port; j++) {
           phy_inst_info = &phy_config_info->phy_inst_config_info[j];

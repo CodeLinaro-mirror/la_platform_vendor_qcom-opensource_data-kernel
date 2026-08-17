@@ -679,7 +679,11 @@ static void ecpriss_xbar_flush_init_v2()
 	xbar_flush.flush_c2c_0_rx = DISABLE_BIT;
 	xbar_flush.flush_c2c_0_tx = ENABLE_BIT;
 	xbar_flush.flush_c2c_1_rx = DISABLE_BIT;
-	xbar_flush.flush_c2c_1_tx = ENABLE_BIT;
+	/* In cascade mode C2C1 (eth31) is the live cascade link;
+	 * flushing it would drop in-flight packets. Keep TX flush
+	 * disabled so traffic is not interrupted.
+	 */
+	xbar_flush.flush_c2c_1_tx = ru_cascade_mode ? DISABLE_BIT : ENABLE_BIT;
 	xbar_flush.flush_c2c_2_rx = DISABLE_BIT;
 	xbar_flush.flush_c2c_2_tx = ENABLE_BIT;
 
@@ -1069,8 +1073,16 @@ void ecpriss_configure_xbar_flush_v2(ecpriss_port_type_e port_type,
 			}
 			else if(event_type == ETH_ECPRISS_EVENT_DOWN)
 			{
-				pr_debug("XBAR flush for C2C port 1 | enable: %d\n", ENABLE_BIT);
-				xbar_flush.flush_c2c_1_tx = ENABLE_BIT;
+				/* In cascade mode C2C1 is the live cascade link;
+				 * never re-enable flush on link-down as it would
+				 * drop packets destined for the remote RU.
+				 */
+				if (!ru_cascade_mode) {
+					pr_debug("XBAR flush for C2C port 1 | enable: %d\n", ENABLE_BIT);
+					xbar_flush.flush_c2c_1_tx = ENABLE_BIT;
+				} else {
+					pr_debug("XBAR flush for C2C port 1 | cascade mode, keeping disabled\n");
+				}
 			}
 		}
 		else if(port_idx == ECPRISS_PORT_2)
@@ -1729,6 +1741,9 @@ int ecpriss_xbar_cold_init_v2(struct device *dev)
 		ecpriss_xbar_enable_stats_v2();
 		ecpriss_xbar_flush_init_v2();
 
+		if (ru_cascade_mode)
+			ecpriss_xbar_set_cascade_default_c2c1_lut_route_to_fh_v2();
+
 		if(ecpriss_pdata_v2)
 		{
 			if(ecpriss_pdata_v2->xbar_ctx_v2)
@@ -2311,4 +2326,33 @@ int ecpriss_xbar_c2c_lut(void)
 int ecpriss_xbar_l2_lut(void)
 {
 	return 0;
+}
+
+/*
+ * ecpriss_xbar_set_cascade_default_c2c1_lut_route_to_fh_v2 - Program the
+ * C2C1 RX default LUT to route all eCPRI traffic (CP UL/DL and UP UL/DL)
+ * to the FH path for RU cascade mode.
+ * Called during XBAR cold init when ru_cascade_mode is active so that
+ * packets arriving on the C2C1 link are forwarded to the FH ports.
+ */
+void ecpriss_xbar_set_cascade_default_c2c1_lut_route_to_fh_v2(void)
+{
+	ecpri_xbar_hwio_def_ecpri_xbar_c2crx_n_default_lut_s lut_entry;
+	
+	memset(&lut_entry, 0, sizeof(lut_entry));
+
+	ecpriss_xbar_hal_read_reg_n_fields(ECPRISS_XBAR_GLOBAL,
+			ECPRI_XBAR_C2CRX_n_DEFAULT_LUT,
+			1,
+			&lut_entry);
+
+	lut_entry.cp_ul_route = HWIO_ECPRI_XBAR_C2CRX_n_DEFAULT_LUT_CP_UL_ROUTE_ROUTE_TO_FH_FVAL;
+	lut_entry.cp_dl_route = HWIO_ECPRI_XBAR_C2CRX_n_DEFAULT_LUT_CP_DL_ROUTE_ROUTE_TO_FH_FVAL;
+	lut_entry.up_ul_route = HWIO_ECPRI_XBAR_C2CRX_n_DEFAULT_LUT_UP_UL_ROUTE_ROUTE_TO_FH_FVAL;
+	lut_entry.up_dl_route = HWIO_ECPRI_XBAR_C2CRX_n_DEFAULT_LUT_UP_DL_ROUTE_ROUTE_TO_FH_FVAL;
+
+	ecpriss_xbar_hal_write_reg_n_fields(ECPRISS_XBAR_GLOBAL,
+			ECPRI_XBAR_C2CRX_n_DEFAULT_LUT,
+			1,
+			&lut_entry);
 }

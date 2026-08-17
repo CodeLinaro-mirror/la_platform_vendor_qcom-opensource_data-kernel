@@ -50,6 +50,7 @@
 #include "mtip_pcs.h"
 #include "mtip_phy.h"
 #include "mtip_platform.h"
+#include "mtip_device.h"
 
 static eth_ecpriss_link_rate_e mtip_client_get_link_rate(u32 port_type)
 {
@@ -657,6 +658,176 @@ int setup_interface_in_loopback_mode(struct net_device *netdev, u32 link_index)
     post_mtip_process_link_state(link_index, true);
     return 0;
 }
+
+/*
+ * mtip_eth_enable_ru_cascade_c2c_bringup - Bring up C2C2 (eth30) and
+ * C2C1 (eth31) in E2E mode for RU cascade.
+ *
+ * Called from ecpriss_eth_topology_init_wq() when ru_cascade_mode=1.
+ */
+
+eth_ecpriss_status_e mtip_eth_enable_ru_cascade_c2c_bringup(void)
+{
+    eth_ecpriss_status_e ret = ETH_ECPRISS_STATUS_SUCCESS;
+    struct net_device *netdev_c2c2 = NULL;
+    struct net_device *netdev_c2c1 = NULL;
+    struct mtip_netdev_priv *priv_c2c2 = NULL;
+    struct mtip_netdev_priv *priv_c2c1 = NULL;
+    u32 port_type = MTIP_PORT_TYPE_L2;
+    u32 lane_index;
+    int i, open_ret;
+    struct mtip_process_lane_up lane_up_info;
+
+    CSMLOGINFO("mtip_eth_enable_ru_cascade_c2c_bringup: E2E bringup of C2C2(eth30) and C2C1(eth31)\n");
+
+    /* --- Null guards --- */
+    if (platform_driver_priv == NULL)
+    {
+        CSMLOGERR("mtip_eth_enable_ru_cascade_c2c_bringup: platform_driver_priv is NULL\n");
+        return ETH_ECPRISS_STATUS_FAILURE;
+    }
+
+    if (platform_driver_priv->mtip_links[MTIP_L2_ETH_LINK_INDEX] == NULL ||
+        platform_driver_priv->mtip_links[MTIP_C2C1_ETH_LINK_INDEX] == NULL ||
+        platform_driver_priv->mtip_ports[port_type] == NULL)
+    {
+        CSMLOGERR("mtip_eth_enable_ru_cascade_c2c_bringup: links or port not allocated\n");
+        return ETH_ECPRISS_STATUS_FAILURE;
+    }
+
+    netdev_c2c2 = platform_driver_priv->mtip_links[MTIP_L2_ETH_LINK_INDEX]->dev;
+    netdev_c2c1 = platform_driver_priv->mtip_links[MTIP_C2C1_ETH_LINK_INDEX]->dev;
+
+    if (!netdev_c2c2 || !netdev_c2c1)
+    {
+        CSMLOGERR("mtip_eth_enable_ru_cascade_c2c_bringup: netdev is NULL\n");
+        return ETH_ECPRISS_STATUS_FAILURE;
+    }
+
+    if (platform_driver_priv->devices.port_devices[port_type].num_lane_phandles == 0)
+    {
+        CSMLOGERR("mtip_eth_enable_ru_cascade_c2c_bringup: no lane phandles for L2 port\n");
+        return ETH_ECPRISS_STATUS_FAILURE;
+    }
+
+
+    for (i = 0; i < platform_driver_priv->devices.port_devices[port_type].num_lane_phandles; ++i)
+    {
+        if (platform_driver_priv->devices.port_devices[port_type].lane_devices[i] == NULL)
+        {
+            CSMLOGERR("mtip_eth_enable_ru_cascade_c2c_bringup: lane_devices[%d] is NULL\n", i);
+            return ETH_ECPRISS_STATUS_FAILURE;
+        }
+
+        lane_index = platform_driver_priv->devices.port_devices[port_type].lane_devices[i]->lane_index;
+
+        if (lane_index >= MTIP_MAX_LANES)
+        {
+            CSMLOGERR("mtip_eth_enable_ru_cascade_c2c_bringup: lane_index %d out of bounds\n", lane_index);
+            return ETH_ECPRISS_STATUS_FAILURE;
+        }
+
+        if (platform_driver_priv->mtip_lanes[lane_index] == NULL)
+        {
+            CSMLOGERR("mtip_eth_enable_ru_cascade_c2c_bringup: mtip_lanes[%d] is NULL\n", lane_index);
+            return ETH_ECPRISS_STATUS_FAILURE;
+        }
+
+      
+        platform_driver_priv->mtip_lanes[lane_index]->sfp_port_type              = PORT_DA;
+        platform_driver_priv->mtip_lanes[lane_index]->speed_mask                 = TRX_LANE_SPEED_10G | TRX_LANE_SPEED_25G |
+                                                                                   TRX_LANE_SPEED_50G | TRX_LANE_SPEED_100G;
+        platform_driver_priv->mtip_lanes[lane_index]->lane_qsfp_info.trx_module_type = TRX_QSFP_PLS_QSFP28_QSFP56;
+        platform_driver_priv->mtip_lanes[lane_index]->lane_qsfp_info.speed_mask      = TRX_LANE_SPEED_10G | TRX_LANE_SPEED_25G |
+                                                                                        TRX_LANE_SPEED_50G | TRX_LANE_SPEED_100G;
+        /* L2 port has 2 lanes (eth30=lane0, eth31=lane2); trx_laneinfo bits 0 and 1
+         * represent those two lanes. 0x3 = both lanes present, which is what
+         * mtip_device_filter_priv_flags() checks for num_lanes=2 on L2 port. */
+        platform_driver_priv->mtip_lanes[lane_index]->lane_qsfp_info.trx_laneinfo    = 0x3;
+        platform_driver_priv->mtip_lanes[lane_index]->lane_qsfp_info.trx_bout_cfg    = 0;
+        /* Also set lane_state = CONNECTED synchronously so that
+         * mtip_device_configure_port() sees all lanes connected immediately
+         * and does not bail out waiting for them. */
+        platform_driver_priv->mtip_lanes[lane_index]->lane_state                 = MTIP_LANE_STATE_CONNECTED;
+
+        memset(&lane_up_info, 0, sizeof(lane_up_info));
+        lane_up_info.lane_index     = lane_index;
+        lane_up_info.sfp_port_type  = PORT_DA;
+        lane_up_info.speed_mask     = TRX_LANE_SPEED_10G | TRX_LANE_SPEED_25G |
+                                      TRX_LANE_SPEED_50G | TRX_LANE_SPEED_100G;
+        lane_up_info.lane_connected = true;
+
+        CSMLOGINFO("mtip_eth_enable_ru_cascade_c2c_bringup: msglvl1 lane_up lane_index=%d PORT_DA\n", lane_index);
+        post_mtip_phy_handle_lane_up(lane_up_info);
+    }
+
+
+    platform_driver_priv->mtip_ports[port_type]->sfp_port_type  = PORT_DA;
+    platform_driver_priv->mtip_ports[port_type]->port_state     = MTIP_PORT_STATE_CONNECTED;
+
+    netdev_c2c2->flags |= IFF_PROMISC;
+    netdev_c2c1->flags |= IFF_PROMISC;
+    CSMLOGINFO("mtip_eth_enable_ru_cascade_c2c_bringup: IFF_PROMISC pre-set on eth30 and eth31\n");
+
+    rtnl_lock();
+    if (netif_running(netdev_c2c2))
+        dev_close(netdev_c2c2);
+    open_ret = dev_open(netdev_c2c2, NULL);
+    rtnl_unlock();
+
+    if (open_ret)
+    {
+        CSMLOGERR("mtip_eth_enable_ru_cascade_c2c_bringup: dev_open(eth30) failed: %d\n", open_ret);
+        ret = ETH_ECPRISS_STATUS_FAILURE;
+        goto out;
+    }
+    CSMLOGINFO("mtip_eth_enable_ru_cascade_c2c_bringup: dev_open(eth30) done\n");
+
+    /* Explicitly set promisc on eth30 MAC after open in case
+     * mtip_mac_initialize() ran before IFF_PROMISC was visible. */
+    priv_c2c2 = netdev_priv(netdev_c2c2);
+    if (mtip_mac_set_promisc_mode(priv_c2c2, true))
+        CSMLOGERR("mtip_eth_enable_ru_cascade_c2c_bringup: promisc set failed for eth30\n");
+    else
+        CSMLOGINFO("mtip_eth_enable_ru_cascade_c2c_bringup: promisc enabled for eth30\n");
+
+    rtnl_lock();
+    if (netif_running(netdev_c2c1))
+        dev_close(netdev_c2c1);
+    open_ret = dev_open(netdev_c2c1, NULL);
+    rtnl_unlock();
+
+    if (open_ret)
+    {
+        CSMLOGERR("mtip_eth_enable_ru_cascade_c2c_bringup: dev_open(eth31) failed: %d\n", open_ret);
+        ret = ETH_ECPRISS_STATUS_FAILURE;
+        goto out;
+    }
+    CSMLOGINFO("mtip_eth_enable_ru_cascade_c2c_bringup: dev_open(eth31) done\n");
+
+    /* Explicitly set promisc on eth31 MAC after open. */
+    priv_c2c1 = netdev_priv(netdev_c2c1);
+    if (mtip_mac_set_promisc_mode(priv_c2c1, true))
+        CSMLOGERR("mtip_eth_enable_ru_cascade_c2c_bringup: promisc set failed for eth31\n");
+    else
+        CSMLOGINFO("mtip_eth_enable_ru_cascade_c2c_bringup: promisc enabled for eth31\n");
+
+    /* -----------------------------------------------------------------------
+     * Set 25G speed mode for C2C2
+     * ----------------------------------------------------------------------- */
+    priv_c2c2->priv_flags     = MTIP_DEVICE_PRIV_FLAGS_BIT_MASK_25G_ONLY_L2_PORT;
+    priv_c2c2->priv_flags_set = true;
+
+    platform_driver_priv->mtip_ports[port_type]->autoneg         = false;
+    platform_driver_priv->mtip_ports[port_type]->autoneg_changed = true;
+
+    CSMLOGINFO("mtip_eth_enable_ru_cascade_c2c_bringup: triggering reconfigure at 25G autoneg=off\n");
+    mtip_netdev_set_port_priv_flags(netdev_c2c2);
+
+out:
+    return ret;
+}
+
 /*
     The exported function to enable link
  */
@@ -716,6 +887,7 @@ eth_ecpriss_status_e mtip_eth_enable_logging_port(bool action)
 
     return ret;
 }
+
 
 void mtip_eth_reeval_logging_port(void)
 {
@@ -787,6 +959,7 @@ struct eth_ecpriss_ops mtip_ecpri_ops = {
     .eth_ecpriss_deregister_events_cb = mtip_eth_deregister_events_cb,
     .eth_ecpriss_get_topology = mtip_eth_get_topology,
     .eth_ecpriss_enable_logging_port = mtip_eth_enable_logging_port,
+    .eth_ecpriss_enable_ru_cascade_c2c_bringup = mtip_eth_enable_ru_cascade_c2c_bringup,
 };
 
 EXPORT_SYMBOL(mtip_ecpri_ops);

@@ -530,7 +530,7 @@ void run_mtip_process_link_state(void* work_ptr)
         {
             CSMLOGERR("get ring state from DMA failed for hdl: %d\n", dma_handle);
         }
-        else if( (link_index != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_DEFAULT) || rx_available == MTIP_RX_RING_SIZE)
+        else if( (link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_DEFAULT) || rx_available == MTIP_RX_RING_SIZE)
         {
             // set the rx mode to IRQ
             setmode = ECPRI_DMA_NOTIFY_MODE_IRQ;
@@ -616,7 +616,7 @@ void run_mtip_process_link_state(void* work_ptr)
         mtip_client_send_event(ETH_ECPRISS_EVENT_DOWN, link_index);
     }
 
-    if ( (link_index != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_LOOPBACK) || (link_index == MTIP_L2_ETH_LINK_INDEX && mtip_c2c2_loopback_mode != MTIP_MODE_C2C2_LOOPBACK ) )
+    if ( (link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_LOOPBACK) || ((link_index == MTIP_L2_ETH_LINK_INDEX || link_index == MTIP_C2C1_ETH_LINK_INDEX) && mtip_c2c2_loopback_mode != MTIP_MODE_C2C2_LOOPBACK ) )
     {
         // notify phy of the link status
         mtip_phy_notify_link_status(link_index, link_up);
@@ -671,7 +671,7 @@ void mtip_process_link_state(u32 link_index, bool link_up)
         {
             CSMLOGERR("get ring state from DMA failed for hdl: %d\n", dma_handle);
         }
-        else if( (link_index != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_DEFAULT) || rx_available == MTIP_RX_RING_SIZE)
+        else if( (link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_DEFAULT) || rx_available == MTIP_RX_RING_SIZE)
         {
             // set the rx mode to IRQ
             setmode = ECPRI_DMA_NOTIFY_MODE_IRQ;
@@ -753,7 +753,7 @@ void mtip_process_link_state(u32 link_index, bool link_up)
         mtip_client_send_event(ETH_ECPRISS_EVENT_DOWN, link_index);
     }
 
-    if ( ( link_index != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_LOOPBACK) || ( link_index == MTIP_L2_ETH_LINK_INDEX &&  mtip_c2c2_loopback_mode != MTIP_MODE_C2C2_LOOPBACK) )
+    if ( ( link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_LOOPBACK) || ( (link_index == MTIP_L2_ETH_LINK_INDEX || link_index == MTIP_C2C1_ETH_LINK_INDEX) &&  mtip_c2c2_loopback_mode != MTIP_MODE_C2C2_LOOPBACK) )
     {
         // notify phy of the link status
         mtip_phy_notify_link_status(link_index, link_up);
@@ -1230,7 +1230,7 @@ static int mtip_start_xmit(struct sk_buff *skb, struct net_device *netdev)
          CSMLOGPTP("timestamp_nsecs=%d,tx_ts_stat=%x\n",timestamp_nsecs,tx_ts_stat);
          while(tx_ts_stat!=2)
          {
-             if ( (mode == MTIP_DEVICE_RUv2 || mode == MTIP_DEVICE_DUv2) && link_index != MTIP_L2_ETH_LINK_INDEX)
+             if ( (mode == MTIP_DEVICE_RUv2 || mode == MTIP_DEVICE_DUv2) && link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX)
              {
                  mtip_mac_read_ts_seq_num(link_index, &tmp_ts_seq_num);
              }
@@ -1397,8 +1397,8 @@ void mtip_rx_mode_set(struct net_device *netdev)
         ret = mtip_mac_set_promisc_mode(priv, true);
         CSMLOGDBG("Enabling all multicast for link index: %d\n", link_index);
  	} 
-    else if (mtip_is_link_in_loopback(link_index) || ( link_index != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_DEFAULT) ||
-            (link_index == MTIP_L2_ETH_LINK_INDEX && mtip_c2c2_loopback_mode != MTIP_MODE_DEFAULT ))
+    else if (mtip_is_link_in_loopback(link_index) || ( link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_DEFAULT) ||
+            ((link_index == MTIP_L2_ETH_LINK_INDEX || link_index == MTIP_C2C1_ETH_LINK_INDEX) && mtip_c2c2_loopback_mode != MTIP_MODE_DEFAULT ))
     {
         ret = mtip_mac_set_promisc_mode(priv, true);
         CSMLOGDBG("Setting promiscuous mode ON for loopback link index: %d\n", link_index);
@@ -1528,15 +1528,21 @@ int mtip_device_open_completion(u32 link_index)
     }
     mutex_unlock(&platform_driver_priv->mtip_links[link_index]->dev_lock);
 
-    // get the sfp port type
-    sfp_port_type = platform_driver_priv->mtip_ports[port_type]->sfp_port_type;
+    // get the sfp port type; C2C links in loopback always use PORT_DA
+    if ((link_index == MTIP_L2_ETH_LINK_INDEX || link_index == MTIP_C2C1_ETH_LINK_INDEX) &&
+        mtip_c2c2_loopback_mode != MTIP_MODE_DEFAULT)
+        sfp_port_type = PORT_DA;
+    else
+        sfp_port_type = platform_driver_priv->mtip_ports[port_type]->sfp_port_type;
 
     // Notify TRX driver to enable TX
     mtip_phy_notify_eth_event_to_trx(link_index, TRX_IFCONFIG_UP);
 
-    // Bring down logging C2C2 port if needed
-    mtip_eth_reeval_logging_port();
-
+        // Bring down logging C2C2 port if needed
+    // Skip this in E2E mode (mtip_c2c2_loopback_mode == DEFAULT) as eth30 is
+    // a live C2C link and must not be torn down based on FH bandwidth.
+    if (mtip_c2c2_loopback_mode != MTIP_MODE_DEFAULT)
+        mtip_eth_reeval_logging_port();
     // bring up the phy
     mtip_phy_bringup_phy(link_index, sfp_port_type);
 
@@ -1750,7 +1756,7 @@ void mtip_netdevice_init(struct net_device *dev)
    dev->netdev_ops = &mtip_netdev_ops;
    priv = netdev_priv(dev);
 
-   if (( (priv->link_index != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_DEFAULT) || ( priv->link_index == MTIP_L2_ETH_LINK_INDEX && mtip_c2c2_loopback_mode != MTIP_MODE_DEFAULT ) ) && !mtip_loopback_enable_arp)
+   if (( (priv->link_index != MTIP_L2_ETH_LINK_INDEX && priv->link_index != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_DEFAULT) || ( (priv->link_index == MTIP_L2_ETH_LINK_INDEX || priv->link_index == MTIP_C2C1_ETH_LINK_INDEX) && mtip_c2c2_loopback_mode != MTIP_MODE_DEFAULT ) ) && !mtip_loopback_enable_arp)
    {
        /* add NOARP */
        dev->flags           |= IFF_NOARP;
@@ -2226,7 +2232,7 @@ void mtip_netdev_assign_port_lanes(u32 port_type)
             lane_speed = PHY_LANE_SPEED_25G;
 
             // front haul ports
-            if (port_type <= MTIP_PORT_TYPE_FH_2) 
+            if (port_type <= MTIP_PORT_TYPE_FH_2)
             {
                 real_link_index_array[0] = 0;
 
@@ -2234,15 +2240,21 @@ void mtip_netdev_assign_port_lanes(u32 port_type)
 
                 lane_to_link_map[0] = 0;
             }
-            else if (port_type == MTIP_PORT_TYPE_L2) 
+            else if (port_type == MTIP_PORT_TYPE_L2)
             {
+                num_links = 2;
+                num_lanes = 2;
+
                 real_link_index_array[0] = 0;
+                real_link_index_array[1] = 1;
 
                 real_lane_index_array[0] = 0;
+                real_lane_index_array[1] = 2;
 
                 lane_to_link_map[0] = 0;
+                lane_to_link_map[2] = 1;
             }
-            else if (port_type == MTIP_PORT_TYPE_DEBUG) 
+            else if (port_type == MTIP_PORT_TYPE_DEBUG)
             {
                 real_link_index_array[0] = 1;
 
@@ -2966,6 +2978,7 @@ static int mtip_device_complete_port_open(u32 port_type)
     int rv = 0;
     u32 link_index;
     int i;
+    int sfp_port_type;
 
     // check if any links are waiting to complete open
     for (i = 0; i < platform_driver_priv->devices.port_devices[port_type].num_link_phandles; ++i)
@@ -2974,11 +2987,22 @@ static int mtip_device_complete_port_open(u32 port_type)
 
        if (platform_driver_priv->mtip_links[link_index] != NULL)
        {
-          if ( ( (link_index != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_LOOPBACK ) || ( link_index == MTIP_L2_ETH_LINK_INDEX &&  mtip_c2c2_loopback_mode != MTIP_MODE_C2C2_LOOPBACK)) &&
+          if ( ( (link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_LOOPBACK ) || ( (link_index == MTIP_L2_ETH_LINK_INDEX || link_index == MTIP_C2C1_ETH_LINK_INDEX) &&  mtip_c2c2_loopback_mode != MTIP_MODE_C2C2_LOOPBACK)) &&
               (platform_driver_priv->mtip_links[link_index]->state == MTIP_LINK_STATE_OPEN_WAITING_FOR_LANES ||
                platform_driver_priv->mtip_links[link_index]->state == MTIP_LINK_STATE_DOWN))
           {
              rv = mtip_device_open_completion(link_index);
+          }
+          else if ((link_index == MTIP_L2_ETH_LINK_INDEX || link_index == MTIP_C2C1_ETH_LINK_INDEX) &&
+                   mtip_c2c2_loopback_mode != MTIP_MODE_C2C2_LOOPBACK &&
+                   (platform_driver_priv->mtip_links[link_index]->state == MTIP_LINK_STATE_INIT ||
+                    platform_driver_priv->mtip_links[link_index]->state == MTIP_LINK_STATE_CLOSE) &&
+                   platform_driver_priv->mtip_links[link_index]->lanes_assignment_complete == true)
+          {
+             sfp_port_type = PORT_DA;
+             CSMLOGINFO("Pre-enabling PCS TX for closed C2C link_index %d sfp_type %d",
+                        link_index, sfp_port_type);
+             mtip_phy_bringup_phy(link_index, sfp_port_type);
           }
        }
     }
@@ -3692,7 +3716,7 @@ void run_mtip_process_netdev_open(void* workptr)
       goto out;
    }
    // Initialize the carrier state as off
-   if ( ( link_index != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode == MTIP_MODE_DEFAULT) || (link_index == MTIP_L2_ETH_LINK_INDEX && mtip_c2c2_loopback_mode == MTIP_MODE_DEFAULT))
+   if ( ( link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode == MTIP_MODE_DEFAULT) || ((link_index == MTIP_L2_ETH_LINK_INDEX || link_index == MTIP_C2C1_ETH_LINK_INDEX) && mtip_c2c2_loopback_mode == MTIP_MODE_DEFAULT))
    {
       netif_carrier_off(netdev);
    }
@@ -3744,15 +3768,15 @@ void run_mtip_process_netdev_open(void* workptr)
    {
       // Change the state for PCS loopback
       CSMLOGINFO("Link state change and dev open for link = %u\n", link_index);
-      if ( mtip_is_link_in_loopback(link_index) || ( link_index != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode == MTIP_MODE_LOOPBACK) || ( link_index == MTIP_L2_ETH_LINK_INDEX && mtip_c2c2_loopback_mode == MTIP_MODE_C2C2_LOOPBACK) )
+      if ( mtip_is_link_in_loopback(link_index) || ( link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode == MTIP_MODE_LOOPBACK) || ( (link_index == MTIP_L2_ETH_LINK_INDEX || link_index == MTIP_C2C1_ETH_LINK_INDEX) && mtip_c2c2_loopback_mode == MTIP_MODE_C2C2_LOOPBACK) )
          platform_driver_priv->mtip_links[link_index]->state = MTIP_LINK_STATE_OPEN_WAITING_FOR_LANES;
 
       // For PCS/PHY loopback mode, configure port based on the speed modes set
-      if ( mtip_is_link_in_loopback(link_index) || ( link_index != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_DEFAULT) || (link_index == MTIP_L2_ETH_LINK_INDEX && mtip_c2c2_loopback_mode != MTIP_MODE_DEFAULT))
+      if ( mtip_is_link_in_loopback(link_index) || ( link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_DEFAULT) || ((link_index == MTIP_L2_ETH_LINK_INDEX || link_index == MTIP_C2C1_ETH_LINK_INDEX) && mtip_c2c2_loopback_mode != MTIP_MODE_DEFAULT))
          mtip_device_configure_port(port_type);
 
       // PCS looback mode
-      if ( ( link_index != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode == MTIP_MODE_LOOPBACK) || ( link_index == MTIP_L2_ETH_LINK_INDEX && mtip_c2c2_loopback_mode == MTIP_MODE_C2C2_LOOPBACK))
+      if ( ( link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode == MTIP_MODE_LOOPBACK) || ( (link_index == MTIP_L2_ETH_LINK_INDEX || link_index == MTIP_C2C1_ETH_LINK_INDEX) && mtip_c2c2_loopback_mode == MTIP_MODE_C2C2_LOOPBACK))
       {
          // Process MAC link up state
          mtip_mac_link_up(link_index);
@@ -3777,14 +3801,20 @@ void run_mtip_process_netdev_open(void* workptr)
 
             mutex_unlock(&platform_driver_priv->mtip_links[link_index]->dev_lock);
 
-            // get the sfp port type
-            sfp_port_type = platform_driver_priv->mtip_ports[port_type]->sfp_port_type;
+            // get the sfp port type; C2C links in loopback always use PORT_DA
+            if ((link_index == MTIP_L2_ETH_LINK_INDEX || link_index == MTIP_C2C1_ETH_LINK_INDEX) &&
+                mtip_c2c2_loopback_mode != MTIP_MODE_DEFAULT)
+                sfp_port_type = PORT_DA;
+            else
+                sfp_port_type = platform_driver_priv->mtip_ports[port_type]->sfp_port_type;
 
             // Notify TRX driver to enable TX
             mtip_phy_notify_eth_event_to_trx(link_index, TRX_IFCONFIG_UP);
 
             // Bring down logging C2C2 port if needed
-            mtip_eth_reeval_logging_port();
+            // Skip in E2E mode — eth30 is a live C2C link, not a logging port.
+            if (mtip_c2c2_loopback_mode != MTIP_MODE_DEFAULT)
+                mtip_eth_reeval_logging_port();
 
             // bring up the phy
             mtip_phy_bringup_phy(link_index, sfp_port_type);

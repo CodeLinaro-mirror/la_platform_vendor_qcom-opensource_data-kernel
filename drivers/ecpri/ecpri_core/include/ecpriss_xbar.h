@@ -547,4 +547,6 @@ int ecpriss_xbar_c2c_rx_lut_v2_logging(uint32_t port_index,
 void ecpriss_xbar_fhrx_default_dma_channel(void);
 
 void ecpriss_xbar_c2crx_default_dma_channel(void);
+
+void ecpriss_xbar_set_cascade_default_c2c1_lut_route_to_fh_v2(void);
 #endif

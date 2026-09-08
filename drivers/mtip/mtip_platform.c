@@ -1392,7 +1392,7 @@ int mtip_platform_setup_ethernet(unsigned int port_type)
                         // initialize the PCS for the link
                         mtip_pcs_config_pcs(i);
 
-                        if ( (i != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode == MTIP_MODE_LOOPBACK) || ( i == MTIP_L2_ETH_LINK_INDEX && mtip_c2c2_loopback_mode == MTIP_MODE_C2C2_LOOPBACK))
+                        if ( (i != MTIP_L2_ETH_LINK_INDEX && i != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode == MTIP_MODE_LOOPBACK) || ( (i == MTIP_L2_ETH_LINK_INDEX || i == MTIP_C2C1_ETH_LINK_INDEX) && mtip_c2c2_loopback_mode == MTIP_MODE_C2C2_LOOPBACK))
                         {
                            // enable pcs loopback on the link
                            mtip_pcs_enable_loopback(i);
@@ -1536,7 +1536,7 @@ static int mtip_platform_setup(void)
 
             netdev = platform_driver_priv->mtip_links[i]->dev;
 
-            if (( i != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode == MTIP_MODE_DEFAULT) || ( i == MTIP_L2_ETH_LINK_INDEX && mtip_c2c2_loopback_mode == MTIP_MODE_DEFAULT))
+            if (( i != MTIP_L2_ETH_LINK_INDEX && i != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode == MTIP_MODE_DEFAULT) || ( (i == MTIP_L2_ETH_LINK_INDEX || i == MTIP_C2C1_ETH_LINK_INDEX) && mtip_c2c2_loopback_mode == MTIP_MODE_DEFAULT))
             {
                // the supported features and hw features
                netdev->hw_features = 0;
@@ -1558,7 +1558,7 @@ static int mtip_platform_setup(void)
                (ETH_HLEN + ETH_FCS_LEN + VLAN_HLEN);
 
             priv->link_index = i;
-            if (mtip_loopback_mode != MTIP_MODE_DEFAULT && !mtip_loopback_enable_arp && priv->link_index != MTIP_L2_ETH_LINK_INDEX)
+            if (mtip_loopback_mode != MTIP_MODE_DEFAULT && !mtip_loopback_enable_arp && priv->link_index != MTIP_L2_ETH_LINK_INDEX && priv->link_index != MTIP_C2C1_ETH_LINK_INDEX)
             {
                CSMLOGERR("header ops registered for link_index : %d\n",priv->link_index);
                netdev->header_ops = &mtip_header_ops;
@@ -1646,7 +1646,7 @@ static int mtip_platform_setup(void)
    {
       if (platform_driver_priv->mtip_links[i] != NULL)
       {
-         if( (i == MTIP_L2_ETH_LINK_INDEX && mtip_c2c2_loopback_mode != MTIP_MODE_DEFAULT) || (i != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_DEFAULT))
+         if( ((i == MTIP_L2_ETH_LINK_INDEX || i == MTIP_C2C1_ETH_LINK_INDEX) && mtip_c2c2_loopback_mode != MTIP_MODE_DEFAULT) || (i != MTIP_L2_ETH_LINK_INDEX && i != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode != MTIP_MODE_DEFAULT))
          {
             // Ensure proper lane assignment for all links
             platform_driver_priv->mtip_links[i]->num_assigned_lanes = 1;

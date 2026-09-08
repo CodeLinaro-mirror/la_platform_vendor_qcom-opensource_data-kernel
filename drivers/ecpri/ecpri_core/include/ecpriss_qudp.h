@@ -427,4 +427,9 @@ int ecpriss_qudp_l2_egress_tp_cfg_v2(int32_t port_index);
 int ecpri_global_cfg_init_cascade_mode(void);
 int ecpri_global_cfg_deinit_cascade_mode(void);
 
+void ecpriss_qudp_set_cascade_fh_mac_dst_check_v2(void);
+void ecpriss_qudp_set_cascade_l2_mac_dst_check_v2(void);
+void ecpriss_qudp_set_cascade_arp_trap_rules_v2(void);
+void ecpriss_qudp_set_cascade_icmp_trap_rules_v2(void);
+
 #endif

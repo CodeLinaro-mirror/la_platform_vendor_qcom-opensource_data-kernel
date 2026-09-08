@@ -215,7 +215,7 @@ static irqreturn_t mtip_mac_interrupt_handler(int irq, void *devptr)
 
                CSMLOGDBG("Tx Timestamp %d, %d read for link: %d with link_index: %d\n", timestamp_secs, timestamp_nsecs, i, link_index);
 
-               if ((mode == MTIP_DEVICE_RUv2 || mode == MTIP_DEVICE_DUv2) && link_index != MTIP_L2_ETH_LINK_INDEX)
+               if ((mode == MTIP_DEVICE_RUv2 || mode == MTIP_DEVICE_DUv2) && link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX)
                {
                    mtip_mac_read_ts_seq_num(link_index, &ts_seq_num);
                }
@@ -725,7 +725,7 @@ void mtip_mac_initialize(struct mtip_netdev_priv *priv)
    mtip_rx_mode_set(platform_driver_priv->mtip_links[link_index]->dev);
 
    // Process link up only for PCS loopback mode
-   if ( (link_index != MTIP_L2_ETH_LINK_INDEX && mtip_loopback_mode == MTIP_MODE_LOOPBACK) || (link_index == MTIP_L2_ETH_LINK_INDEX && mtip_c2c2_loopback_mode == MTIP_MODE_C2C2_LOOPBACK))
+   if ( (link_index != MTIP_L2_ETH_LINK_INDEX && link_index != MTIP_C2C1_ETH_LINK_INDEX && mtip_loopback_mode == MTIP_MODE_LOOPBACK) || ((link_index == MTIP_L2_ETH_LINK_INDEX || link_index == MTIP_C2C1_ETH_LINK_INDEX) && mtip_c2c2_loopback_mode == MTIP_MODE_C2C2_LOOPBACK))
    {
        post_mtip_process_link_state(link_index, true);
    }
@@ -793,7 +793,10 @@ static u32 mtip_mac_wrapper_calendar_cfg_val(struct mtip_port_device_info* port_
     case MTIP_PORT_CONFIG_1x25GBASE_R_FEC:
     case MTIP_PORT_CONFIG_1x25GBASE_R_RSFEC:
         {
-            cfg_val = MTIP_MAC_WRAPPER_CALENDAR_CFG_REG_VAL_1_LINKS;
+            if (port_type == MTIP_PORT_TYPE_L2)
+                cfg_val = MTIP_MAC_WRAPPER_CALENDAR_CFG_REG_VAL_2_LINKS;
+            else
+                cfg_val = MTIP_MAC_WRAPPER_CALENDAR_CFG_REG_VAL_1_LINKS;
         }
         break;
 
@@ -1375,7 +1378,10 @@ void mtip_mac_wrapper_init(struct mtip_port_device_info* port_device)
    case MTIP_PORT_CONFIG_1x25GBASE_R_FEC:
    case MTIP_PORT_CONFIG_1x25GBASE_R_RSFEC:
        {
-           tx_amf_cfg_val = MTIP_MAC_WRAPPER_TX_AMF_CFG_REG_VAL_1_LINKS;
+           if (port_type == MTIP_PORT_TYPE_L2)
+               tx_amf_cfg_val = MTIP_MAC_WRAPPER_TX_AMF_CFG_REG_VAL_2_LINKS;
+           else
+               tx_amf_cfg_val = MTIP_MAC_WRAPPER_TX_AMF_CFG_REG_VAL_1_LINKS;
        }
        break;
 

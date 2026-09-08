@@ -144,7 +144,9 @@ struct dentry *mtip_dobj;
 
 int mtip_attr_val;
 
+#ifndef MIN
 #define MIN(a,b) ((a < b) ? a : b)
+#endif
 
 char help_menu[] = {
 "Help Menu:\n\

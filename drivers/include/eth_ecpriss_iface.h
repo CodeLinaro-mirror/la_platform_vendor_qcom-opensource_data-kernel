@@ -224,6 +224,17 @@ eth_ecpriss_status_e eth_ecpriss_deregister_events_cb(void);
 
 eth_ecpriss_status_e eth_ecpriss_enable_logging_port(bool action);
 
+
+/**
+ * eth_ecpriss_enable_ru_cascade_c2c_bringup() - Bring up C2C2
+ * (eth30) and C2C1 (eth31) in E2E mode for RU cascade.
+ * Called when ru_cascade_mode=1 instead of the loopback path.
+ *
+ * Returns:	0 on success, negative on failure
+ */
+
+eth_ecpriss_status_e eth_ecpriss_enable_ru_cascade_c2c_bringup(void);
+
 /**
  * struct eth_ecpriss_ops - Structure to hold ETH - eCPRI
  * interface functions
@@ -238,6 +249,7 @@ struct eth_ecpriss_ops {
 		(eth_ecpriss_dev_mode_e *device_mode,
 		 eth_ecpriss_topology_root_s *topology_params);
 	eth_ecpriss_status_e (*eth_ecpriss_enable_logging_port)(bool action);
+	eth_ecpriss_status_e (*eth_ecpriss_enable_ru_cascade_c2c_bringup)(void);
 };
 
 #endif // ECPRI_ETH_H

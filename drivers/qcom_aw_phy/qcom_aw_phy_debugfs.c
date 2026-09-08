@@ -12,6 +12,7 @@
 
 #include <linux/sysfs.h>
 #include <linux/debugfs.h>
+#include <linux/delay.h>
 
 #include "qcom_aw_phy_main.h"
 #include "qcom_aw_phy_mtip_if.h"
@@ -45,6 +46,15 @@ static const struct file_operations qcom_aw_phy_debug_fs_ops = {
 
 static const struct file_operations qcom_aw_phy_debug_fs_prbs_result_ops = {
   .read = qcom_aw_phy_get_prbs_result,
+};
+
+static ssize_t qcom_aw_phy_get_prbs_status(struct file *file, char __user *buf,
+                                            size_t count, loff_t *ppos);
+
+extern bool prbs_test_running;
+
+static const struct file_operations qcom_aw_phy_debug_fs_prbs_status_ops = {
+  .read = qcom_aw_phy_get_prbs_status,
 };
 
 static const struct file_operations qcom_aw_phy_debug_fs_tx_eq_ops = {
@@ -106,12 +116,23 @@ uint64_t                               ber[12] = {0};
 bool                                   check_prbs_all_lanes = false;
 uint32_t                               port_config_mask = 0x800000;
 
+static ssize_t qcom_aw_phy_get_prbs_status(struct file *file, char __user *buf,
+                                            size_t count, loff_t *ppos)
+{
+  char dbg_buf[32] = {0};
+  int nbytes = scnprintf(dbg_buf, sizeof(dbg_buf),
+                         "running: %d\n", prbs_test_running ? 1 : 0);
+  return simple_read_from_buffer(buf, count, ppos, dbg_buf, nbytes);
+}
+
 aw_txfir_config_t        tx_fir_cfg_cache[QCOM_AW_PHY_INST_MAX][PHY_LANE_MAX] = {{0}};
 bool                     tx_fir_cfg_cache_valid[QCOM_AW_PHY_INST_MAX][PHY_LANE_MAX] = {{false}};
 
 extern struct eth_phy_iface_ops qcom_aw_phy_driver_iface_ops;
 
+#ifndef MIN
 #define MIN(a,b) ((a < b) ? a : b)
+#endif
 
 char help_menu[] = {
 "1		ETH PHY drivers interface registration(dummy MAC/PHY registration)\n\
@@ -179,6 +200,9 @@ void qcom_aw_phy_setup_debugfs() {
 
   debugfs_create_file("prbs_result", 0644, dobj, 0,
                       &qcom_aw_phy_debug_fs_prbs_result_ops);
+
+  debugfs_create_file("prbs_status", 0444, dobj, 0,
+                      &qcom_aw_phy_debug_fs_prbs_status_ops);
 
   debugfs_create_file("tx_eq_val", 0644, dobj, 0,
                       &qcom_aw_phy_debug_fs_tx_eq_ops);
@@ -281,6 +305,7 @@ ssize_t qcom_aw_phy_set_attr(struct file *file, const char __user *buf,
   mss_access_t tx_mss = {.phy_offset = 0, .lane_offset = 0};
   int enable_flag = 0;
   uint32_t err_cnt_55_32, err_cnt_31_0;
+  u32 remaining = 0;
   bool error = false;
   enum qcom_aw_phy_eq_mode_enum eq_mode = QCOM_AW_PHY_EQ_MODE_MIN;
 
@@ -733,7 +758,11 @@ ssize_t qcom_aw_phy_set_attr(struct file *file, const char __user *buf,
           }
         }
 
-        USR_SLEEP(1000000 * measure_time);
+          prbs_test_running = true;
+          remaining = (u32)measure_time;
+          while (remaining--)
+            msleep(1000);
+          prbs_test_running = false;
 
         for (j = min_port; j <= max_port; j++) {
           phy_inst_info = &phy_config_info->phy_inst_config_info[j];

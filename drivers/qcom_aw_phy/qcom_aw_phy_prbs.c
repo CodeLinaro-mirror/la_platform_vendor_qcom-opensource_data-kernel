@@ -15,6 +15,7 @@
 #include <linux/netlink.h>
 #include <linux/syscalls.h>
 #include <linux/sysfs.h> /* sysfs addition*/
+#include <linux/delay.h>
 #include <net/genetlink.h>
 #include "qcom_aw_phy_utils.h"
 #include "eth_phy_iface.h"
@@ -35,6 +36,7 @@ data_csm_diag_prbs_params data_csm_diag_prbs_params_info = {
     .num_of_errors = 0};
 
 data_csm_diag_prbs_result data_csm_diag_prbs_result_info;
+bool prbs_test_running;
 
 struct genl_ops qcom_aw_phy_prbs_genl_ops[DATA_CSM_DIAG_GNL_CMD_COUNT] = {
     {
@@ -165,6 +167,7 @@ int qcom_aw_phy_prbs_enable_disable(uint8_t enable_flag) {
   mss_access_t mss = {.phy_offset = 0, .lane_offset = 0};
   mss_access_t tx_mss = {.phy_offset = 0, .lane_offset = 0};
   uint32_t err_cnt_55_32, err_cnt_31_0;
+  u32 remaining = 0;
   int prbs_lane_index = 0;
 
   QCOM_AW_PHY_LOG_ERR("Configuring TX BIST, enabled = %d", enable_flag);
@@ -261,7 +264,11 @@ int qcom_aw_phy_prbs_enable_disable(uint8_t enable_flag) {
       }
     }
 
-    USR_SLEEP(1000000 * data_csm_diag_prbs_params_info.monitor_duration);
+    prbs_test_running = true;
+    remaining = (u32)data_csm_diag_prbs_params_info.monitor_duration;
+    while (remaining--)
+      msleep(1000);
+    prbs_test_running = false;
 
     for (j = min_port; j <= max_port; j++) {
       phy_inst_info = &phy_config_info->phy_inst_config_info[j];
